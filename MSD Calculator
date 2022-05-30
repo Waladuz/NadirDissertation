@@ -1,0 +1,48 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import glob
+import os
+from scipy.optimize import curve_fit
+
+# Change to directory where file is located
+os.chdir(r'U:\Messwerte\Sai - MSD Calculator')
+
+# Read data as t | x | y format - note: delete all header lines, only numbers should remain
+data = np.loadtxt('testData.txt')
+data = np.transpose(data)
+
+t = data[0]
+x = data[1]
+y = data[2]
+
+MSD = np.zeros(len(t) - 1)
+
+# t values to be evaluated - in most MSD later times are not relevant
+max_range = 20
+# Highest max value is the length of MSD array
+max_range = np.min([max_range, len(MSD)])
+
+for n in range(1, max_range):
+    temp = 0
+    for i in range(n):
+         temp += (x[i] - x[0])**2 + (y[i] - y[0])
+    MSD[i] = temp/n
+
+# Save MSD vs t data
+newData = np.array([t[0: max_range], MSD[0: max_range]])
+np.savetxt("MSD.txt", np.transpose(newData))
+
+# Zoom in on Beginning
+plt.plot(t[0: max_range], MSD[0: max_range])
+
+
+def second_order_poly_fit(t, v, D):
+    return 4*D*t + t*t*v*v
+
+# Data fitting using MSD = 4Dt * v²t² - only valid for low t
+popt, pcov = curve_fit(second_order_poly_fit, t[0: max_range], MSD[0: max_range])
+print("D = " + str(popt[1]))
+print("v = " + str(popt[0]))
+
+plt.plot(t[0: max_range], second_order_poly_fit(t[0: max_range], popt[0], popt[1]))
+plt.show()
