@@ -1,0 +1,191 @@
+import numpy as np
+import tifffile as tf
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
+
+class DICF:
+    def __int__(self):
+        self.tiff_len = 0
+        self.tau_average_dictionary = {}
+        self.filepath = ''
+        self.filename = ''
+        self.q_axis = None
+        self.pixel_scale = 0.23 # in µm / pixel
+        self.time_scale = 0.01  # in seconds
+        self.scale_data = True
+        self.use_windowing = True
+        self.window_mask = None
+        self.window_created = True
+
+    def rgb2gray(self, rgb):
+        return np.dot(rgb[..., :3], [0.2989, 0.5870, 0.1140])
+
+    def radial_averaging(self, image, tau):
+        y_center = int(image.shape[0] / 2)
+        x_center = int(image.shape[1] / 2)
+
+        min_length = np.min([image.shape[0], image.shape[1]]) - np.min([y_center, x_center])
+
+        angle_division = 200
+
+        radial = np.zeros(min_length)
+
+        if self.tau_average_dictionary.get(tau) is None:
+            self.tau_average_dictionary[tau] = radial
+
+        if self.q_axis is None:
+            self.q_axis = np.linspace(0, min_length, int(min_length))
+            self.q_axis = self.q_axis * 2 * np.pi / image.shape[0] / self.pixel_scale
+
+        for j in range(angle_division):
+            angle = 2 * np.pi / angle_division * j
+            dir = np.matmul(self.rotation_matrix((angle / 2)), np.array([1, 0]))
+            for i in range(min_length - 1):
+                y = int(y_center + dir[0] * i)
+                x = int(x_center + dir[1] * i)
+                radial[i] += image[y][x]
+
+        self.tau_average_dictionary[tau] += radial / angle_division
+
+    def rotation_matrix(self, theta):
+        return np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+
+    def itarate_through_files(self, tau_array):
+        self.filepath = r'C:\Users\namoelle\Desktop\Dissertation\Figure\\'
+        self.filename = 'stack.tif'
+        img = tf.imread(
+            self.filepath + self.filename)
+        self.tiff_len = img.shape[0]
+        for t in tau_array:
+            tau = t
+            tau = int(tau)
+            max_length = 300
+            counter = 0
+            for i in range(1, np.min([self.tiff_len - tau - 1, max_length])):
+                self.load_file(i, tau)
+                counter += 1
+
+            temp = self.tau_average_dictionary.get(tau) / counter
+            print("tau = " + str(tau * self.time_scale))
+
+        print_array = np.zeros([len(self.tau_average_dictionary) + 1, self.tau_average_dictionary.get(tau).shape[0]])
+        all_array = np.zeros([len(self.tau_average_dictionary), self.tau_average_dictionary.get(tau).shape[0]])
+
+        for i in range(len(self.tau_average_dictionary) + 1):
+            if i == 0:
+                print_array[i] = self.q_axis
+            else:
+                print_array[i] = self.tau_average_dictionary.get(tau_array[i - 1])
+
+        for i in range(len(self.tau_average_dictionary)):
+            all_array[i] = self.tau_average_dictionary.get(tau_array[i])
+
+        if self.scale_data is True:
+            all_array /= 1e10
+            print_array[1:-1] /= 1e10
+
+        header_text = "Time scale of delay tau in seconds\nq (1/µm)"
+        for i in range(len(self.tau_average_dictionary)):
+            header_text += '\t' + str(tau_array[i] * self.time_scale)
+
+        np.savetxt(
+            self.filepath + r'\all-tau-q.txt',
+            np.transpose(print_array), delimiter='\t',
+            header=header_text)
+
+        def fit_function_g2(x, A, B, T):
+            return A * (1 - np.exp(- x / T)) + B
+
+        def fit_function_power(x, a):
+            return a * x ** 2
+
+        # FITTING
+
+        # TO DO: Get q-axis values from self.q_axis
+        begin_point = 1
+        end_point = 100
+        q_range = np.linspace(begin_point, end_point, end_point - begin_point + 1)
+        t_fit_array = np.zeros_like(q_range)
+        new_q_range = np.zeros_like(q_range)
+
+        for i in range(len(q_range)):
+            q = q_range[i]
+            q = int(q)
+            new_q_range[i] = self.q_axis[q]
+            popt, pcov = curve_fit(fit_function_g2, tau_array * self.time_scale, np.transpose(all_array)[q],
+                                   bounds=(0, np.inf))
+            t_fit_array[i] = popt[2]
+            print('{0}\t{1}'.format(self.q_axis[q], popt[2]))
+
+        # print(new_q_range)
+
+        popt, pcov = curve_fit(fit_function_power, new_q_range, 1 / t_fit_array)
+
+        plt.plot(new_q_range, fit_function_power(new_q_range, *popt))
+
+        plt.plot(new_q_range, 1 / t_fit_array, 'bo', label='fit: ' + str(str(popt[0])) + 'µm²/s')
+        plt.xscale('log')
+        plt.yscale('log')
+        plt.xlabel('q (1/µm)')
+        plt.ylabel('1/T (1/s)')
+        plt.show()
+
+        print("\n")
+        print("D = " + str(popt[0]) + "µm²/s")
+        r = 1.28 * 10 ** -23 * 297 / 6 / np.pi / .0009 / popt[0] / 10 ** -12
+        print("r = " + str(r))
+
+        '''
+        x_range = np.linspace(tau_array[0], tau_array[-1], 500)
+        plt.plot(x_range, fit_function(x_range, *popt))
+
+        plt.plot(tau_array, np.transpose(all_array)[10], 'bo', label='data')
+        plt.xscale('log')
+        plt.show()
+        '''
+
+    def load_file(self, image_number, tau):
+        tau = int(tau)
+        img = tf.imread(
+            self.filepath + self.filename)
+
+        test1 = img[image_number]
+        test1 = np.asarray(test1)
+
+        test2 = img[image_number + tau]
+        test2 = np.asarray(test2)
+
+        if self.use_windowing:
+            if self.window_mask is None:
+                image_shape = test1.shape
+                x = np.linspace(0, image_shape[1] - 1, image_shape[1])
+                y = np.linspace(0, image_shape[0] - 1, image_shape[0])
+
+                x, y = np.meshgrid(x, y)
+
+                self.window_mask = .25 * (1 - np.cos(2 * np.pi * x / (image_shape[1] - 1))) * (
+                            1 - np.cos(2 * np.pi * y / (image_shape[0] - 1)))
+
+            test1 = test1 * self.window_mask
+            test2 = test2 * self.window_mask
+
+        ftimage1 = np.fft.fft2(test1)
+        ftimage2 = np.fft.fft2(test2)
+
+        ftimage = ftimage1 - ftimage2
+        ftimage = np.fft.ifftshift(ftimage)
+
+        temp = np.abs(np.real(ftimage) ** 2 + np.imag(ftimage) ** 2)
+
+        self.radial_averaging(temp, tau)
+
+
+main = DICF()
+main.__int__()
+# main.load_file(5, 1)
+
+sus = np.linspace(.5, np.log10(300), 40)
+taus = np.unique(np.round(np.power(10, sus)))
+print(taus)
+# taus = np.array([3, 5, 10, 30, 50])
+main.itarate_through_files(taus)
