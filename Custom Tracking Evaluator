@@ -1,0 +1,266 @@
+import numpy as np
+import os
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Cursor, Button
+
+
+class TrajectoryEval:
+    def __init__(self):
+        self.a = 0
+        self.a_point = np.zeros(2, dtype=float)
+        self.b_point = np.zeros(2, dtype=float)
+        self.all_vel = []
+        self.maxTime = 0
+
+
+    class Trajectory(object):
+        def __init__(self, number):
+            self.number = number
+            self.dataArr = []
+            # Structure : Time\t    Distance
+            self.time_distance = []
+
+    class TimeTrajectories(object):
+        def __init__(self, num):
+            self.time = num
+            self.dataArr = []
+
+    def read_numbers(self, a, b, is_radial=False):
+        print(str(a) + " " + str(b))
+        temp = np.array([a, b])
+        if np.all(self.a_point == 0):
+            self.a_point = temp
+            if is_radial:
+                plt.close()
+        elif np.all(self.b_point == 0):
+            self.b_point = temp - self.a_point
+            plt.close()
+        else:
+            return
+
+    def read_lines(self):
+
+        counter = 1
+        arr = []
+        skip = True
+        trajectories = []
+
+        '''
+            Shape of Data
+            frame 
+            x (pixel)     
+            y (pixel)    
+            z (pixel)      
+            m0         
+            m1           
+            m2           
+            m3           
+            m4           
+            s 
+        '''
+
+        os.chdir(r"U:\Messwerte\E210210-Nafion\TrackVideo\TrackResult")
+        img = mpimg.imread('Substack (1-500-5) - Zoom.png')
+        fig, ax = plt.subplots()
+        ax.imshow(img)
+
+        cursor = Cursor(ax, horizOn=True, vertOn=True, color='white', linewidth=2.0)
+
+        def onclick(event):
+
+            self.read_numbers(event.xdata, event.ydata)
+
+        fig.canvas.mpl_connect('button_press_event', onclick)
+
+        plt.show()
+
+        with open('Trajectories.txt') as f:
+            lines = f.readlines()
+            for line in lines:
+                if len(line) > 90 or len(line) < 108:
+                    list_to_str = ''.join([str(elem) for elem in line])
+                    a = np.fromstring(list_to_str, sep=' ')
+                    if len(a) > 8 and skip:
+                        skip = False
+                        trajectories.append(self.Trajectory(counter))
+                    elif len(a) > 8:
+                        arr.append(a)
+                        self.maxTime = np.max([a[0], self.maxTime])
+                    elif len(a) < 8 and not skip:
+                        skip = True
+                        counter += 1
+                        trajectories[trajectories.__len__() - 1].dataArr = arr
+                        arr = []
+
+        for i in range(trajectories.__len__()):
+            for j in range(trajectories[i].dataArr.__len__()):
+                point = np.array([trajectories[i].dataArr[j][1], trajectories[i].dataArr[j][2]])
+                dist = np.linalg.norm(point - self.a_point)
+                time = np.NaN
+                if j > 0 and trajectories[i].dataArr[j][0] > 26:
+                    velo = dist - trajectories[i].time_distance[j - 1][1]
+                    time = trajectories[i].time_distance[j - 1][0]
+                    self.all_vel.append(np.array([dist, velo, time]))
+                else:
+                    velo = np.NaN
+
+                trajectories[i].time_distance.append(np.array([trajectories[i].dataArr[j][0], dist, velo, time]))
+
+        time_traj = []
+
+        for j in range(1, int(self.maxTime)):
+            time_traj.append(self.TimeTrajectories(j))
+            time_arr = []
+            for i in range(len(self.all_vel)):
+                temp = self.all_vel[i][2]
+                if int(temp) == j:
+                    time_arr.append(np.array([self.all_vel[i][0], self.all_vel[i][1]]))
+            time_traj[j - 1].dataArr = time_arr
+
+        print(time_traj[50].dataArr)
+
+        self.all_vel = np.array(self.all_vel)
+        x = []
+        y = []
+        for i in range(len(self.all_vel)):
+            x.append(self.all_vel[i][0])
+            y.append(self.all_vel[i][1])
+
+        x = np.array(x)
+        y = np.array(y)
+        data = np.array([x, y])
+
+        # print(np.sort(data, axis=1))
+        bins = np.arange(0, 4000, 90)
+
+        all = []
+        for p in range(1, len(bins)):
+            temp = []
+            bottom = bins[p - 1]
+            top = bins[p]
+            for i in range(len(x)):
+                if top > x[i] > bottom:
+                    temp.append(y[i])
+            if temp.__len__() != 0:
+                all.append(np.mean(np.array(temp)))
+            else:
+                all.append(np.nan)
+
+        for i in range(len(np.array(all))):
+            print(str(bins[i]) + "\t" + str(all[i]))
+
+        #for i in range(1, self.maxTime):
+        #    for j in range(len(self.all_vel)
+
+        # np.histogram(np.array([x, y]), bins=x2)
+        plt.plot(bins[:-1], np.array(all), linestyle='None', marker=11)
+        # plt.hist(np.array([x, y]), bins=20)
+        plt.show()
+
+    def pump_trajectories(self):
+        skip = True
+        counter = 1
+        trajectories = []
+        arr = []
+
+        os.chdir(r"U:\Messwerte\E210315-IEX45-PS7-ParticleTracking")
+        img = mpimg.imread('1FPS - Substack (40-160).png')
+        fig, ax = plt.subplots()
+        ax.imshow(img)
+
+        cursor = Cursor(ax, horizOn=True, vertOn=True, color='white', linewidth=2.0)
+
+        def onclick(event):
+            self.read_numbers(event.xdata, event.ydata, True)
+
+        fig.canvas.mpl_connect('button_press_event', onclick)
+
+        plt.show()
+
+        with open('Trajectories.txt') as f:
+            lines = f.readlines()
+            for line in lines:
+                if len(line) > 90 or len(line) < 108:
+                    list_to_str = ''.join([str(elem) for elem in line])
+                    a = np.fromstring(list_to_str, sep=' ')
+                    if len(a) > 8 and skip:
+                        skip = False
+                        trajectories.append(self.Trajectory(counter))
+                    elif len(a) > 8:
+                        arr.append(a)
+                        self.maxTime = np.max([a[0], self.maxTime])
+                    elif len(a) < 8 and not skip:
+                        skip = True
+                        counter += 1
+                        trajectories[trajectories.__len__() - 1].dataArr = arr
+                        arr = []
+
+        for i in range(trajectories.__len__()):
+            for j in range(trajectories[i].dataArr.__len__()):
+                point = np.array([trajectories[i].dataArr[j][1], trajectories[i].dataArr[j][2]])
+                dist = np.linalg.norm(point - self.a_point)
+                time = np.NaN
+                if j > 0 and trajectories[i].dataArr[j][0] > 26:
+                    velo = dist - trajectories[i].time_distance[j - 1][1]
+                    time = trajectories[i].time_distance[j - 1][0]
+                    if velo > 0:
+                        velo = np.NaN
+                    else:
+                        self.all_vel.append(np.array([dist, velo, time]))
+                else:
+                    velo = np.NaN
+
+                trajectories[i].time_distance.append(np.array([trajectories[i].dataArr[j][0], dist, velo, time]))
+
+        self.all_vel = np.array(self.all_vel)
+        print(self.all_vel.shape)
+        x = []
+        y = []
+        for i in range(len(self.all_vel)):
+            x.append(self.all_vel[i][0])
+            y.append(self.all_vel[i][1])
+
+        x = np.array(x)
+        y = np.array(y)
+        data = np.array([x, y])
+
+        # print(np.sort(data, axis=1))
+        bins = np.arange(0, 2000, 25)
+        #bins = np.array([0, 20, 30, 40, 50, 60, 70, 80, 100, 130, 160, 200, 240, 300, 350, 400, 450, 500, 550, 650, 700, 750, 800, 850, 900, 950])
+        all = []
+        for p in range(1, len(bins)):
+            temp = []
+            bottom = bins[p - 1]
+            top = bins[p]
+            for i in range(len(x)):
+                if top > x[i] > bottom:
+                    temp.append(y[i])
+            if temp.__len__() != 0:
+                all.append(np.mean(np.array(temp)))
+            else:
+                all.append(np.nan)
+
+        for i in range(len(np.array(all))):
+            print(str(bins[i]) + "\t" + str(all[i]))
+
+        #for i in range(1, self.maxTime):
+        #    for j in range(len(self.all_vel)
+
+        # np.histogram(np.array([x, y]), bins=x2)
+        plt.plot(bins[:-1], np.array(all), linestyle='None', marker=11)
+        # plt.hist(np.array([x, y]), bins=20)
+        plt.show()
+
+
+
+
+
+
+
+func = TrajectoryEval()
+# For Membranes
+func.read_lines()
+
+# For Pumps
+#func.pump_trajectories()
