@@ -1,0 +1,179 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+from matplotlib import cm
+from scipy.ndimage import gaussian_filter
+
+
+class VelocityFieldMapper:
+    def __int__(self):
+        self.data = None
+        self.sorted_data = None
+        self.max_distance = 5500
+
+        self.x_box_numbers = 0
+        self.y_box_numbers = 0
+
+        self.box_size = 70
+        self.pixel_size = .23 * 2
+
+    def load_data(self):
+        # Insert here file path + file name
+        self.data = np.transpose(np.loadtxt(
+            r"\\serverkomet336\Moeller1\pHPrinting\HighSpeedCameraMeasurements\CIEX45 + Si832\Tracer1 - 100FPS - 20x Mag\p31-tracer.txt"))
+        self.sort_data()
+
+    def sort_data(self):
+        matplotlib.rcParams.update({'font.size': 14})
+
+
+        temp_data_holder = []
+
+        for i in range(0, len(self.data[0]), 2):
+            temp = np.asarray([[self.data[1][i], self.data[2][i]], [self.data[1][i + 1], self.data[2][i + 1]]])
+            if self.calculate_euclidian_square_distance(temp[0], temp[1]) < self.max_distance:
+                temp_data_holder.append(temp)
+
+        self.sorted_data = np.asarray(temp_data_holder)
+
+        sorted_copy = self.sorted_data
+
+        box_x_size = np.max(self.data[1])
+        box_x_size = int(np.ceil(box_x_size / self.box_size))
+
+        box_y_size = np.max(self.data[2])
+        box_y_size = int(np.ceil(box_y_size / self.box_size))
+
+        self.x_box_numbers = box_x_size
+        self.y_box_numbers = box_y_size
+
+        # First Row - x/y Box, Second Row - Coordinates point 1, Third Row - Coordinates point 2
+        box_entry = np.zeros([box_x_size, box_y_size, 2])
+        box_speed_entry = np.zeros([box_x_size, box_y_size])
+
+        counter = 0
+
+        '''
+        #box_entry[0] = np.array([box_x_size, box_y_size])
+        for i in range(len(sorted_copy)):
+            position = (sorted_copy[i][0] + sorted_copy[i][1]) / 2
+            for j in range(int(box_x_size) - 1):
+                for k in range(int(box_y_size) - 1):
+                    if j * self.box_size < position[0] < (j + 1) * self.box_size:
+                        if k * self.box_size < position[1] < (k + 1) * self.box_size:
+                            counter += 1
+
+
+        count = np.shape(sorted_copy)[0]
+        print(str(counter) + "/" + str(count))
+        '''
+        counter = 0
+        print(box_entry.shape)
+
+        for j in range(int(box_x_size)):
+            for k in range(int(box_y_size)):
+                amount = 0
+                temp_vec = np.zeros_like(sorted_copy[0][0])
+                for i in range(len(sorted_copy)):
+                    position = (sorted_copy[i][0] + sorted_copy[i][1]) / 2
+                    if j * self.box_size < position[0] < (j + 1) * self.box_size:
+                        if k * self.box_size < position[1] < (k + 1) * self.box_size:
+                            amount += 1
+                            counter += 1
+                            temp_vec += sorted_copy[i][1] - sorted_copy[i][0]
+                if amount > 0:
+                    temp_vec /= amount
+                speed = np.sqrt(temp_vec[0]**2 + temp_vec[1]**2) * self.pixel_size
+                box_entry[j][k] = temp_vec / speed * .45
+                if speed < 1:
+                    box_entry[j][k] = temp_vec * 0
+                box_speed_entry[j][k] = np.max([1, speed])
+
+        count = np.shape(sorted_copy)[0]
+        print(str(counter) + "/" + str(count))
+        x = np.linspace(0, box_x_size - 1, box_x_size)
+        y = np.linspace(0, box_y_size - 1, box_y_size)
+        # For guide-for-eye line
+        x_fine = np.linspace(0, box_x_size - 1, 500)
+        y_fine = np.linspace(0, box_y_size - 1, 500)
+
+        x, y = np.meshgrid(y, x)
+        x_fine, y_fine = np.meshgrid(y_fine, x_fine)
+
+        x_direction_box = np.zeros([box_x_size, box_y_size])
+        y_direction_box = np.zeros([box_x_size, box_y_size])
+
+        for j in range(int(box_x_size)):
+            for k in range(int(box_y_size)):
+                x_direction_box[j][k] = box_entry[j][k][0]
+                y_direction_box[j][k] = box_entry[j][k][1]
+
+        print(x.shape)
+        print(x_direction_box.shape)
+
+        print(y.shape)
+        print(y_direction_box.shape)
+        a = .21
+        b = 11.5
+        x0 = -2.4
+
+        a2 = 2
+        b2 = 42
+        x02 = -2.4
+
+        is_PS = False
+
+
+        diffusion_indicator_map_mix = np.zeros_like(box_speed_entry)
+        if not is_PS:
+            diffusion_indicator_map1 = np.zeros_like(box_speed_entry)
+            diffusion_indicator_map2 = np.zeros_like(box_speed_entry)
+            diffusion_indicator_map1 = np.where(y_fine > np.cosh(a * (x_fine - x0 - diffusion_indicator_map1.shape[1]/2)) + b, 1, 0.1)
+            diffusion_indicator_map2 = np.where(y_fine > np.cosh(a2 * (x_fine - x02 - diffusion_indicator_map2.shape[1]/2)) + b2, 0.01, 1)
+            diffusion_indicator_map_mix = diffusion_indicator_map1 * diffusion_indicator_map2
+            diffusion_indicator_map_mix = np.flipud(diffusion_indicator_map_mix)
+        else:
+            r = 13
+            x0 = 20.7
+            y0 = 34
+            xa = .85
+            ya = 1
+
+            diffusion_indicator_map_mix = np.where(((x_fine-x0)/xa)**2 + ((y_fine-y0)/ya)**2 < r**2, 1., 0.01)
+
+        diffusion_indicator_map_mix = gaussian_filter(diffusion_indicator_map_mix, sigma=5)
+
+        # for p6 - yOffset = 40
+        yOffset = -50
+        xOffset = 5
+
+        fig1, ax1 = plt.subplots()
+        self.box_size = self.box_size * self.pixel_size
+        #ax1.contourf(y_fine * self.box_size, x_fine * self.box_size, np.flipud(diffusion_indicator_map_mix), antialiased=True, cmap=cm.coolwarm)
+        qm = plt.quiver(y * self.box_size - yOffset, x * self.box_size - xOffset, x_direction_box, y_direction_box, box_speed_entry, scale=20, cmap='PuBu', width=.006,
+                        norm=matplotlib.colors.LogNorm(vmin= 1,vmax= 12))
+        plt.xlim(0, 630)
+        plt.ylim(0, 420)
+        collabels = np.array([1, 2, 5, 8, 10])
+
+        cb = plt.colorbar(ticks=collabels,fraction=0.041, pad=0.04, aspect=15)
+
+        #cb.set_ticks(collabels)
+        cb.set_ticklabels(collabels)
+        cb.set_label(r'velocity (µms$^{-1}$)')
+        qm.axes.set_aspect('equal')
+
+        plt.xlabel("X (µm)")
+        plt.ylabel("Y (µm)", labelpad=3)
+        plt.savefig(r'\\serverkomet336\Moeller1\pHPrinting\HighSpeedCameraMeasurements\CIEX45 + Si832\Tracer1 - 100FPS - 20x Mag\p6\p31-600dpi.png', dpi=600)
+        plt.show()
+
+
+    def calculate_euclidian_square_distance(self, a_vec, b_vec):
+        difference = a_vec - b_vec
+        return difference[0] ** 2 + difference[1] ** 2
+
+
+main = VelocityFieldMapper()
+main.__int__()
+main.load_data()
