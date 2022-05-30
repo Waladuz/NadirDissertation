@@ -1,0 +1,141 @@
+import numpy as np
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
+from matplotlib.widgets import Cursor, Button
+import os
+import glob
+from scipy.optimize import curve_fit
+
+class TrailWidth:
+    def __init__(self):
+        self.img = None
+        self.a_point = np.zeros(2, dtype=float)
+        self.b_point = np.zeros(2, dtype=float)
+        # Correspond to 2D linear function (x,y) = vec{d} + lambda * vec{l}
+        self.l_vector = np.zeros(2, dtype=float)
+        self.d_vector = np.zeros(2, dtype=float)
+        self.ten_step_array = []
+        self.all_width_array = []
+        self.all_in_ten_step_array = []
+        self.pixel_width = 500
+        self.skip_points = 40
+        self.counter = 0
+
+    def iterate_through_images(self):
+        os.chdir(r'\\serverkomet336\Moeller1\3_pH-Colloid Printing\SiO2_832nm\CIEX45\Velocity-Dependence\7,5')
+        for file in glob.glob("*.jpg"):
+            self.img = mpimg.imread(file)
+            self.read_data(self.counter == 0)
+            if self.counter % 10 == 0:
+                print(self.counter)
+            self.counter += 1
+        final_ten_step_array = np.asarray(self.ten_step_array)
+        final_ten_step_array = np.transpose(final_ten_step_array)
+        np.savetxt('10StepAverage.txt', final_ten_step_array)
+
+        final_width_array = np.asarray(self.all_width_array)
+        final_width_array = np.transpose(final_width_array)
+        np.savetxt('AllWidth.txt', final_width_array)
+
+        added_zero_string = ""
+
+        if self.counter < 10:
+            added_zero_string = "00"
+        elif self.counter < 100:
+            added_zero_string = "0"
+
+        np.savetxt("AverageIntensitySeries_" + added_zero_string + str(self.counter) + ".txt", np.transpose(np.asarray(self.all_in_ten_step_array)))
+
+
+
+    def diffusion_line_source(self, x, A, w, y0, x0):
+        return A*2/(8*np.pi * w) * np.exp(-(x - x0)**2/(4 * w)) + y0    # Gauss Line Source
+        #return y0 + (A/(w*np.sqrt(np.pi/2)))*np.exp(-2*((x-x0)/w)**2)   # Normal Distribution
+
+    def read_data(self, isInit):
+        #self.img = mpimg.imread(r'U:\Messwerte\E210518 - pH Printing\AIEX-Splinter\SiO2-Trails\DSC_7165.jpg')
+
+        if isInit:
+            fig, ax = plt.subplots()
+            ax.imshow(self.img)
+
+            cursor = Cursor(ax, horizOn=True, vertOn=True, color='white', linewidth=2.0)
+
+            def onclick(event):
+                self.read_numbers(event.xdata, event.ydata)
+
+            fig.canvas.mpl_connect('button_press_event', onclick)
+
+            plt.show()
+
+            self.d_vector = self.a_point
+            temp_vector = np.zeros(2, dtype=float)
+            temp_vector = self.a_point - self.b_point
+            self.l_vector = temp_vector/np.sqrt(np.sum(temp_vector*temp_vector))
+
+        self.average_perpendicular_lines()
+
+    def average_perpendicular_lines(self):
+        perpendicular_x_data = np.linspace(-self.pixel_width, self.pixel_width, 2 * self.pixel_width + 1)
+        perpendicular_intensity_data = np.zeros_like(perpendicular_x_data)
+
+        temp_vector = np.zeros(2, dtype=float)
+        temp_vector = self.a_point - self.b_point
+        temp_vector_length = np.sqrt(np.sum(temp_vector*temp_vector))
+
+        temp_vector_length = int(temp_vector_length)
+
+        perpendicular_l_vector = np.zeros(2, dtype=float)
+        perpendicular_l_vector[0] = -self.l_vector[1]
+        perpendicular_l_vector[1] = self.l_vector[0]
+
+        for j in range(int(temp_vector_length)):
+            perpendicular_d_vector = self.d_vector - j * self.l_vector
+            for i in range(len(perpendicular_x_data)):
+                pixel_position = perpendicular_d_vector + perpendicular_x_data[i] * perpendicular_l_vector
+                sum_value = np.sum(self.img[int(pixel_position[1])][int(pixel_position[0])])
+                perpendicular_intensity_data[i] += sum_value
+
+        added_zero_string = ""
+
+        if self.counter < 10:
+            added_zero_string = "00"
+        elif self.counter < 100:
+            added_zero_string = "0"
+        #np.savetxt("AverageIntensity" + added_zero_string + str(self.counter) + ".txt", perpendicular_intensity_data / temp_vector_length)
+
+        try:
+            #guess = np.array([40000, 100, 100, 180])
+            #popt, pcov = curve_fit(self.diffusion_line_source, perpendicular_x_data * .933, perpendicular_intensity_data / temp_vector_length, p0=guess, method='trf', bounds=np.zeros_like(guess))
+            #self.all_width_array.append(np.abs(popt[1]))
+            self.all_width_array.append(np.sum(perpendicular_intensity_data / temp_vector_length))
+        except:
+            self.all_width_array.append(np.sum(perpendicular_intensity_data / temp_vector_length))
+            #self.all_width_array.append(0)
+
+        self.all_in_ten_step_array.append(perpendicular_intensity_data / temp_vector_length)
+
+        if self.counter % 10 == 0:
+            self.ten_step_array.append(perpendicular_intensity_data / temp_vector_length)
+
+        if self.counter % 50 == 0:
+            if self.counter != 0:
+                np.savetxt("AverageIntensitySeries_" + added_zero_string + str(self.counter) + ".txt", np.transpose(np.asarray(self.all_in_ten_step_array)))
+                self.all_in_ten_step_array = []
+        #plt.plot(perpendicular_x_data, perpendicular_intensity_data / temp_vector_length)
+        #plt.show()
+
+    def read_numbers(self, a, b):
+        print(str(a) + " " + str(b))
+        temp = np.array([a, b])
+        if np.all(self.a_point == 0):
+            self.a_point = temp
+        elif np.all(self.b_point == 0):
+            self.b_point = temp
+            plt.close()
+        else:
+            return
+
+
+main = TrailWidth()
+main.iterate_through_images()
